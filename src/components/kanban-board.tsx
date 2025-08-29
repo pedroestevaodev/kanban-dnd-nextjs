@@ -9,17 +9,20 @@ import {
   useSensor,
   useSensors,
   type DragEndEvent,
+  type DragOverEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
-import { SortableContext } from "@dnd-kit/sortable";
+import { arrayMove, SortableContext } from "@dnd-kit/sortable";
 import { createPortal } from "react-dom";
+import { TaskCard } from "./task-card";
 
 const KanBanBoard = () => {
   const [columns, setColumns] = useState<Column[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [activeColumn, setActiveColumn] = useState<Column | null>(null);
+  const [activeTask, setActiveTask] = useState<Task | null>(null);
 
-  const columnsId = useMemo(() => {
+  const columnsIds = useMemo(() => {
     return columns.map((column) => column.id);
   }, [columns]);
 
@@ -61,6 +64,7 @@ const KanBanBoard = () => {
 
   const deleteColumn = (id: Id) => {
     setColumns(columns.filter((column) => column.id !== id));
+    setTasks(tasks.filter((task) => task.columnId !== id));
   };
 
   const createTask = (columnId: Id) => {
@@ -84,24 +88,76 @@ const KanBanBoard = () => {
 
   const onDragStart = (event: DragStartEvent) => {
     const { active } = event;
-    setActiveColumn(columns.find((column) => column.id === active.id) || null);
+
+    if (active.data.current?.type === "Column") {
+      setActiveColumn(active.data.current?.column || null);
+    }
+
+    if (active.data.current?.type === "Task") {
+      setActiveTask(active.data.current?.task || null);
+    }
   };
 
   const onDragEnd = (event: DragEndEvent) => {
+    setActiveColumn(null);
+    setActiveTask(null);
+
     const { active, over } = event;
 
     if (!over) return;
 
+    const activeId = active.id;
+    const overId = over.id;
+
+    if (activeId === overId) return;
+
     setColumns((prevColumns) => {
-      const oldIndex = prevColumns.findIndex((col) => col.id === active.id);
-      const newIndex = prevColumns.findIndex((col) => col.id === over.id);
+      const activeColumnIndex = prevColumns.findIndex(
+        (col) => col.id === activeId
+      );
+      const overColumnIndex = prevColumns.findIndex((col) => col.id === overId);
 
-      const updatedColumns = [...prevColumns];
-      const [movedColumn] = updatedColumns.splice(oldIndex, 1);
-      updatedColumns.splice(newIndex, 0, movedColumn);
-
-      return updatedColumns;
+      return arrayMove(prevColumns, activeColumnIndex, overColumnIndex);
     });
+  };
+
+  const onDragOver = (event: DragOverEvent) => {
+    const { active, over } = event;
+
+    if (!over) return;
+
+    const activeId = active.id;
+    const overId = over.id;
+
+    if (activeId === overId) return;
+
+    const isActiveATask = active.data.current?.type === "Task";
+    const isOverATask = over.data.current?.type === "Task";
+
+    if (!isActiveATask) return;
+
+    if (isActiveATask && isOverATask) {
+      setTasks((prevTasks) => {
+        const activeIndex = prevTasks.findIndex((task) => task.id === activeId);
+        const overIndex = prevTasks.findIndex((task) => task.id === overId);
+
+        prevTasks[activeIndex].columnId = prevTasks[overIndex].columnId;
+
+        return arrayMove(prevTasks, activeIndex, overIndex);
+      });
+    }
+
+    const isOverAColumn = over.data.current?.type === "Column";
+
+    if (isActiveATask && isOverAColumn) {
+      setTasks((prevTasks) => {
+        const activeIndex = prevTasks.findIndex((task) => task.id === activeId);
+
+        prevTasks[activeIndex].columnId = overId;
+
+        return arrayMove(prevTasks, activeIndex, activeIndex);
+      });
+    }
   };
 
   return (
@@ -110,10 +166,11 @@ const KanBanBoard = () => {
         sensors={sensors}
         onDragStart={onDragStart}
         onDragEnd={onDragEnd}
+        onDragOver={onDragOver}
       >
         <div className="flex gap-4 mx-auto">
           <div className="flex gap-4">
-            <SortableContext items={columnsId}>
+            <SortableContext items={columnsIds}>
               {columns.map((column) => (
                 <ColumnContainer
                   key={column.id}
@@ -129,7 +186,7 @@ const KanBanBoard = () => {
             </SortableContext>
           </div>
           <button
-            className="h-[60px] w-[350px] min-w-[350px] cursor-pointer rounded-lg bg-main-bg border-2 border-column-bg p-4 ring-rose-500 hover:ring-2"
+            className="h-[60px] w-[350px] min-w-[350px] cursor-pointer rounded-lg bg-main-bg border-2 border-column-bg p-4 ring-rose-500 hover:ring-2 flex items-center justify-start gap-2"
             onClick={createNewColumn}
           >
             <PlusIcon />
@@ -149,6 +206,13 @@ const KanBanBoard = () => {
                 updateTask={updateTask}
                 deleteTask={deleteTask}
                 tasks={tasksByColumn[activeColumn.id] || []}
+              />
+            )}
+            {activeTask && (
+              <TaskCard
+                task={activeTask}
+                updateTask={updateTask}
+                deleteTask={deleteTask}
               />
             )}
           </DragOverlay>,
